@@ -1,4 +1,4 @@
-package reader
+package pbm
 
 import (
 	"bufio"
@@ -12,22 +12,18 @@ type PBMReader struct {
 	err error
 }
 
-type PBMHeader struct {
-	Width    int
-	Height   int
-	Comments []string
-}
-
 func NewPBMReader(r *bufio.Reader) *PBMReader {
 	return &PBMReader{
 		Reader: r,
 	}
 }
 
+// Err returns sticky error of the reader.
 func (nr PBMReader) Err() error {
 	return nr.err
 }
 
+// GetNextByteAsRune reads a byte as Rune.
 func (pr *PBMReader) GetNextByteAsRune() rune {
 	if pr.err != nil {
 		return 0
@@ -40,37 +36,38 @@ func (pr *PBMReader) GetNextByteAsRune() rune {
 	return rune(b)
 }
 
-func (nr *PBMReader) GetHeader() (PBMHeader, bool) {
-	var header PBMHeader
+// GetConfig reads header section of the PBM P1 and returns the PBM header configuration
+func (nr *PBMReader) GetConfig() (Config, bool) {
+	var config Config
 
 	rune1 := nr.GetNextByteAsRune()
 	if rune1 != 'P' {
-		return PBMHeader{}, false
+		return Config{}, false
 	}
 	rune2 := nr.GetNextByteAsRune()
 	if rune2 != '1' {
-		return PBMHeader{}, false
+		return Config{}, false
 	}
 	if !unicode.IsSpace(nr.GetNextByteAsRune()) {
-		return PBMHeader{}, false
+		return Config{}, false
 	}
 
-	numbers, comments, err := nr.parseHeader()
-	if err != nil {
-		return PBMHeader{}, false
+	numbers, comments := nr.parseHeader()
+	if nr.Err() != nil {
+		return Config{}, false
 	}
-	header.Comments = comments
-	header.Width = numbers[0]
-	header.Height = numbers[1]
+	config.Comments = comments
+	config.Width = numbers[0]
+	config.Height = numbers[1]
 
 	if nr.Err() != nil {
-		return PBMHeader{}, false
+		return Config{}, false
 	}
 
-	return header, true
+	return config, true
 }
 
-func (nr *PBMReader) parseHeader() ([]int, []string, error) {
+func (nr *PBMReader) parseHeader() ([]int, []string) {
 	num := 0                         // Current number
 	numbers := make([]int, 0, 2)     // All numbers
 	cmt := make([]rune, 0, 100)      // Current comment
@@ -98,9 +95,11 @@ Loop:
 				state = ReadComment
 				prevState = ReadSpace
 			} else if c == 0 {
-				return nil, nil, errors.New("unexpected eof in header")
+				nr.err = errors.New("unexpected eof in header")
+				return nil, nil
 			} else {
-				return nil, nil, fmt.Errorf("unexpected char in header %q", c)
+				nr.err = fmt.Errorf("unexpected char in header %q", c)
+				return nil, nil
 			}
 
 		case ReadNumber:
@@ -111,15 +110,17 @@ Loop:
 				state = ReadSpace
 				numbers = append(numbers, num)
 				if len(numbers) == 2 {
-					return numbers, comments, nil
+					return numbers, comments
 				}
 			} else if c == '#' {
 				state = ReadComment
 				prevState = ReadNumber
 			} else if c == 0 {
-				return nil, nil, errors.New("unexpected eof in header")
+				nr.err = errors.New("unexpected eof in header")
+				return nil, nil
 			} else {
-				return nil, nil, fmt.Errorf("unexpected char in header %q", c)
+				nr.err = fmt.Errorf("unexpected char in header %q", c)
+				return nil, nil
 			}
 
 		case ReadComment:
@@ -138,5 +139,6 @@ Loop:
 			break Loop
 		}
 	}
-	return nil, nil, errors.New("unexpected eof in header")
+	nr.err = errors.New("unexpected eof in header")
+	return nil, nil
 }

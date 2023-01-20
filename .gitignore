@@ -24,4 +24,5 @@
 
 /build
 /vendor
-/data
+/data/*
+/bin/*

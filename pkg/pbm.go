@@ -9,21 +9,26 @@ import (
 	"strings"
 	"sync"
 	"unicode"
-
-	"github.com/iboware/pbm_rotate/pkg/reader"
 )
 
 type PBM struct {
-	Header *reader.PBMHeader
+	Config *Config
 	BitMap *[][]uint8
 }
 
-func DecodePBM(r io.Reader) (*PBM, error) {
+type Config struct {
+	Width    int      // Width of the image
+	Height   int      // Height of the image
+	Comments []string // Comments of the image
+}
+
+// Decode reads PBM file from an io.Reader and returns it as a PBM object
+func Decode(r io.Reader) (*PBM, error) {
 	br := bufio.NewReader(r)
-	pr := reader.NewPBMReader(br)
+	pr := NewPBMReader(br)
 
 	// Parse the PBM header.
-	header, ok := pr.GetHeader()
+	header, ok := pr.GetConfig()
 	if !ok {
 		err := pr.Err()
 		if err == nil {
@@ -32,7 +37,6 @@ func DecodePBM(r io.Reader) (*PBM, error) {
 		return nil, err
 	}
 	errorFunc := func() (*PBM, error) {
-
 		err := pr.Err()
 		if err == nil {
 			err = errors.New("failed to parse PBM data")
@@ -65,17 +69,31 @@ func DecodePBM(r io.Reader) (*PBM, error) {
 	}
 
 	return &PBM{
-		Header: &header,
+		Config: &header,
 		BitMap: &bitmap,
 	}, nil
 }
 
-func (pbm *PBM) RotateByAngle(angle float64) {
-	bitmap := *pbm.BitMap
+// RotateByAngle rotates an image by angle using rotation matrix.
+// https://en.wikipedia.org/wiki/Rotation_matrix
+func (p *PBM) RotateByAngle(angle float64) error {
+	if p == nil {
+		return errors.New("no image loaded")
+	}
+
+	if p.BitMap == nil {
+		return errors.New("no bitmap loaded")
+	}
+
+	if p.Config == nil {
+		return errors.New("no header loaded")
+	}
+
+	bitmap := *p.BitMap
 	cos := math.Cos(angle)
 	sin := math.Sin(angle)
 
-	newImage, shiftX, shiftY := emptyImageAndShift(bitmap, cos, sin)
+	newImage, shiftX, shiftY := resizeAndShiftImage(bitmap, cos, sin)
 	var wg sync.WaitGroup
 	for i := 0; i < len(bitmap); i++ {
 		for j := 0; j < len(bitmap[i]); j++ {
@@ -90,12 +108,53 @@ func (pbm *PBM) RotateByAngle(angle float64) {
 	}
 	wg.Wait()
 
-	pbm.Header.Height = len(newImage)
-	pbm.Header.Width = len(newImage[0])
-	*pbm.BitMap = newImage
+	p.Config.Height = len(newImage)
+	p.Config.Width = len(newImage[0])
+	*p.BitMap = newImage
+
+	return nil
 }
 
-func emptyImageAndShift(bitmap [][]uint8, cos, sin float64) (img [][]uint8, shiftX, shiftY int) {
+// Encode writes the PBM image into disk by given io.Writer
+func (p *PBM) Encode(w io.Writer) error {
+	if p == nil {
+		return errors.New("no image loaded")
+	}
+
+	if p.BitMap == nil {
+		return errors.New("no bitmap loaded")
+	}
+
+	if p.Config == nil {
+		return errors.New("no header loaded")
+	}
+
+	wb := bufio.NewWriter(w)
+
+	fmt.Fprintln(wb, "P1")
+	for _, c := range p.Config.Comments {
+		c = strings.Replace(c, "\n", " ", -1)
+		c = strings.Replace(c, "\r", " ", -1)
+		fmt.Fprintf(wb, "# %s\n", c)
+	}
+
+	fmt.Fprintf(wb, "%d %d\n", p.Config.Width, p.Config.Height)
+
+	for _, row := range *p.BitMap {
+		for _, col := range row {
+			fmt.Fprintf(wb, "%d ", col)
+		}
+		fmt.Fprint(wb, "\n")
+	}
+	if err := wb.Flush(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// resizeAndShiftImage resizes and shifts bits in the matrix of bitmap.
+func resizeAndShiftImage(bitmap [][]uint8, cos, sin float64) (img [][]uint8, shiftX, shiftY int) {
 	var lock = sync.Mutex{}
 	var wg sync.WaitGroup
 	var xMax, yMax, xLow, yLow int
@@ -136,24 +195,4 @@ func emptyImageAndShift(bitmap [][]uint8, cos, sin float64) (img [][]uint8, shif
 		newImage[i] = make([]uint8, height+1)
 	}
 	return newImage, shiftX, shiftY
-}
-func (p *PBM) Save(w io.Writer) {
-	wb := bufio.NewWriter(w)
-
-	fmt.Fprintln(wb, "P1")
-	for _, c := range p.Header.Comments {
-		c = strings.Replace(c, "\n", " ", -1)
-		c = strings.Replace(c, "\r", " ", -1)
-		fmt.Fprintf(wb, "# %s\n", c)
-	}
-
-	fmt.Fprintf(wb, "%d %d\n", p.Header.Width, p.Header.Height)
-
-	for _, row := range *p.BitMap {
-		for _, col := range row {
-			fmt.Fprintf(wb, "%d ", col)
-		}
-		fmt.Fprint(wb, "\n")
-	}
-	wb.Flush()
 }

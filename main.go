@@ -3,10 +3,11 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"math"
 	"os"
 
-	"github.com/iboware/pbm_rotate/pkg/pbm"
+	pbm "github.com/iboware/pbm_rotate/pkg"
 )
 
 var usage = `Usage: pbm_rotate [options...]
@@ -39,13 +40,13 @@ func main() {
 
 	f, err := os.OpenFile(filePath, os.O_RDWR, os.ModeAppend)
 	if err != nil {
-		panic(err)
+		log.Fatalf("Failed opening the image: %s", err.Error())
 	}
 	defer f.Close()
 
-	pbmImage, err := pbm.DecodePBM(f)
+	pbmImage, err := pbm.Decode(f)
 	if err != nil {
-		panic(err)
+		log.Fatalf("Failed decoding the image: %s", err.Error())
 	}
 
 	radians := -1 * angle * (math.Pi / 180) // multiplied by -1 to make it clockwise.
@@ -53,7 +54,9 @@ func main() {
 
 	f.Truncate(0)
 	f.Seek(0, 0)
-	pbmImage.Save(f)
+	if err := pbmImage.Encode(f); err != nil {
+		log.Fatalf("Failed encoding the image: %s", err.Error())
+	}
 }
 
 func usageAndExit(msg string) {
